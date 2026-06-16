@@ -16,10 +16,12 @@ typedef struct {
 typedef enum {
     MAT_SUCCESS = 0,
     MAT_ERROR_NULL_POINTER = 1,
-    MAT_ERROR_OUT_OF_BOUNDS = 2,
-    MAT_ERROR_DIMENSION_MISMATCH = 3,
-    MAT_ERROR_NOT_SQUARE = 4,
-    MAT_ERROR_ALLOCATION_FAILED = 5
+    MAT_ERROR_NULL_DATA_POINTER = 2,
+    MAT_ERROR_OUT_OF_BOUNDS = 3,
+    MAT_ERROR_DIMENSION_MISMATCH = 4,
+    MAT_ERROR_NOT_SQUARE = 5,
+    MAT_ERROR_ALLOCATION_FAILED = 6,
+    MAT_ALIASING_NOT_ALLOWED = 7,
 } matrix_status_t;
 
 /**
@@ -53,7 +55,7 @@ int mprint(const matrix_t* m);
  * @param val `float` value to write in the matrix.
  * @return matrix_status_t Status code of the operation.
  */
-int mwrite(matrix_t** m, int row, int col, float val);
+int mwrite(matrix_t* m, int row, int col, float val);
 
 /**
  * @brief Read a value from a matrix.
@@ -71,7 +73,7 @@ int mread(const matrix_t* m, int row, int col, float* res);
  * @param m_out Pointer to the transposed matrix.
  * @return matrix_status_t Status code of the operation.
  */
-int mtpose(const matrix_t* m, matrix_t** m_out);
+int mtpose(const matrix_t* m, matrix_t* m_out);
 
 /**
  * @brief Add two matrices together in a new matrix.
@@ -80,7 +82,7 @@ int mtpose(const matrix_t* m, matrix_t** m_out);
  * @param m_out Matrix pointer to the resulting matrix.
  * @return matrix_status_t Status code of the operation.
  */
-int madd(const matrix_t* a, const matrix_t* b, matrix_t** m_out);
+int madd(const matrix_t* a, const matrix_t* b, matrix_t* m_out);
 
 /**
  * @brief Multiplicate a matrix by a scalar value.
@@ -89,7 +91,7 @@ int madd(const matrix_t* a, const matrix_t* b, matrix_t** m_out);
  * @param m_out Matrix pointer to the resulting matrix.
  * @return matrix_status_t Status code of the operation.
  */
-int mmul_scalar(const matrix_t* m, float s, matrix_t** m_out);
+int mmul_scalar(const matrix_t* m, float s, matrix_t* m_out);
 
 /**
  * @brief Multiplicate two matrices.
@@ -98,6 +100,6 @@ int mmul_scalar(const matrix_t* m, float s, matrix_t** m_out);
  * @param m_out Matrix pointer to the resulting matrix.
  * @return matrix_status_t Status code of the operation.
  */
-int mmul(const matrix_t* a, const matrix_t* b, matrix_t** m_out);
+int mmul(const matrix_t* a, const matrix_t* b, matrix_t* m_out);
 
 #endif
