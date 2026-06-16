@@ -30,6 +30,7 @@ int mfree(matrix_t** m) {
     }; 
     
     free(*m);
+    *m = NULL;
 
     return MAT_SUCCESS;
 }
@@ -39,13 +40,11 @@ int mprint(const matrix_t* m) {
     if (m->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
 
     const float* data = m->data;
-    const int rows = m->rows;
-    const int cols = m->columns;
+    const float *end = data + (m->rows * m->columns);
 
-    // TODO: Move this to SIMD-optimized pointer increment
-    for (int i=0; i < cols; i++) {
-        for (int j=0; j < cols; j++) {
-            printf("%f ", *(data+(i*cols)+j));
+    for (int i=0; i < m->rows; i++) {
+        for (int j=0; j < m->columns; j++) {
+            printf("%f ", *data++);
         };
         printf("\n");
     };
@@ -102,13 +101,15 @@ int madd(const matrix_t* a, const matrix_t* b, matrix_t* m_out) {
         m_out->columns != a->columns ||
         m_out->rows != a->rows)
         return MAT_ERROR_DIMENSION_MISMATCH;
+    if (a->data == NULL || b->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
 
-    // Look into pointer incremental operation here for SIMD optimization
-    for (int i=0; i < a->rows; i++) {
-        for (int j=0; j < a->columns; j++) {
-            *(m_out->data+(i*m_out->columns)+j) = *(a->data+(i*a->columns)+j) + (*(b->data+(i*b->columns)+j));
-        };
-    };
+    const float *ptr_a = a->data;
+    const float *ptr_b = b->data;
+    float *ptr_out = m_out->data;
+    float *end = ptr_out + (a->rows * a->columns);
+
+    for (; ptr_out < end; ptr_a++, ptr_b++, ptr_out++)
+        *ptr_out = *ptr_a + *ptr_b;
 
     return MAT_SUCCESS;
 }
@@ -212,7 +213,7 @@ int mmul(const matrix_t* a, const matrix_t* b, matrix_t* m_out) {
     const int tpose_threshold = 32;
     const int lt_threshold = 256;
 
-    if ((a->rows > lt_threshold && a->columns > lt_threshold) || (b->rows > lt_threshold && b->columns > lt_threshold)) return mmul_lt(a, b, m_out);
+    //if ((a->rows > lt_threshold && a->columns > lt_threshold) || (b->rows > lt_threshold && b->columns > lt_threshold)) return mmul_lt(a, b, m_out);
     if (b->columns > tpose_threshold) return mmul_tpose(a, b, m_out);
     return mmul_small(a, b, m_out);
 }
