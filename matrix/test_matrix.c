@@ -1,7 +1,7 @@
 #include <assert.h>
-#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <math.h>
 #include "matrix.h"
 
 #include <unistd.h>
@@ -10,131 +10,217 @@ bool float_eq(float a, float b) {
     return fabs(a-b) < 0.0001f;
 }
 
-bool matrix_t_eq(const matrix_t* a, const matrix_t* b) {
-    if (a->rows != b->rows) return false;
-    if (a->columns != b->columns) return false;
-    for (int i=0; i < (a->rows*a->columns); i++)
-        if (!float_eq(*(a->data+i), *(b->data+i))) return false;
-    return true;
-}
-
 void test_allocation() {
-    matrix_t *m;
-    mnew(32768, 32768, &m);
+    matrix_s *m;
+    matrix_status_s res;
 
+    // Allocate the matrix
+    res = mnew(32768, 32768, &m);
+    assert(res == MAT_SUCCESS);
     assert(m != NULL);
-
     assert(m->rows == 32768);
     assert(m->columns == 32768);
-
     assert(m->data != NULL);
-    for (int i=0; i < (m->rows*m->columns); i++)
-        assert(*(m->data+i) == 0.0f);
 
-    sleep(10);
-    mfree(&m);
+    const int rows = m->rows;
+    const int cols = m->columns;
+    const float* data = m->data;
+
+    // Check the data section was correctly initialized and zeroed
+    for (int i=0; i < (rows*cols); i++)
+        assert(data[i] == 0.0f);
+
+    // Free the matrix
+    res = mfree(&m);
+    assert(res == MAT_SUCCESS);
     printf("Allocation tests passed!\n");
 }
 
 void test_write() {
-    matrix_t *m, *n;
-    mnew(2, 2, &m);
-    mnew(2, 2, &n);
-    assert(matrix_t_eq(m, n));
+    matrix_s *m, *n;
+    matrix_status_s res;
+    bool e;
 
-    int res = mwrite(m, 0, 0, 5.0f);
+    // Allocate the matrices
+    res = mnew(2, 2, &m);
     assert(res == MAT_SUCCESS);
-    assert(!matrix_t_eq(m, n));
+    res = mnew(2, 2, &n);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, n, &e);
+    assert(res == MAT_SUCCESS);
+    assert(e);
 
-    mfree(&m);
-    mfree(&n);
+    // Write to Matrix M
+    res = mwrite(m, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+
+    // Check M==N
+    res = meq(m, n, &e);
+    assert(res == MAT_SUCCESS);
+    assert(!e);
+
+    // Free the matrices
+    res = mfree(&m);
+    assert(res == MAT_SUCCESS);
+    res = mfree(&n);
+    assert(res == MAT_SUCCESS);
     printf("Write test passed!\n");
 }
 
 void test_read() {
-    matrix_t *m, *n;
-    mnew(2, 2, &m);
-    mnew(2, 2, &n);
-    assert(matrix_t_eq(m, n));
+    matrix_s *m, *n;
+    matrix_status_s res;
+    bool e;
 
-    mwrite(m, 0, 0, 5.0f);
-    mwrite(n, 0, 0, 5.0f);
-    float a;
-    int res = mread(m, 0, 0, &a);
+    // Allocate the matrices
+    res = mnew(2, 2, &m);
     assert(res == MAT_SUCCESS);
-    assert(matrix_t_eq(m, n));
+    res = mnew(2, 2, &n);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, n, &e);
+    assert(res == MAT_SUCCESS);
+    assert(e);
+
+    // Write to the matrices
+    res = mwrite(m, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+    res = mwrite(n, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+
+    // Test for the written value
+    float a;
+    res = mread(m, 0, 0, &a);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, n, &e);
+    assert(res == MAT_SUCCESS);
+    assert(e);
     assert(float_eq(a, 5.0f));
 
-    mfree(&m);
-    mfree(&n);
+    // Free the matrices
+    res = mfree(&m);
+    assert(res == MAT_SUCCESS);
+    res = mfree(&n);
+    assert(res == MAT_SUCCESS);
     printf("Read test passed!\n");
 }
 
 void test_transposition() {
-    matrix_t *m, *m_out;
-    mnew(3, 5, &m);
-    mnew(5, 3, &m_out);
-    assert(m != NULL);
-    assert(m_out != NULL);
+    matrix_s *m, *m_out;
+    matrix_status_s res;
 
-    mwrite(m, 0, 0, 5.0f);
-    mwrite(m, 0, 1, 5.0f);
-    int status = mtpose(m, m_out);
+    // Allocate matrix
+    res = mnew(3, 5, &m);
+    assert(res == MAT_SUCCESS);
+    res = mnew(5, 3, &m_out);
+    assert(res == MAT_SUCCESS);
+    assert(m != NULL && m->data != NULL);
+    assert(m_out != NULL && m->data != NULL);
 
-    assert(status == MAT_SUCCESS);
+    //Write to the source matrix
+    res = mwrite(m, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+    res = mwrite(m, 0, 1, 5.0f);
+    assert(res == MAT_SUCCESS);
+    
+    // Perform the transposition
+    res = mtpose(m, m_out);
+    assert(res == MAT_SUCCESS);
 
-    float res;
-    mread(m_out, 1, 0, &res);
-    assert(float_eq(res, 5.0f));
+    // Check the value was correctly transposed
+    float a;
+    res = mread(m_out, 1, 0, &a);
+    assert(res == MAT_SUCCESS);
+    assert(float_eq(a, 5.0f));
 
-    mfree(&m);
-    mfree(&m_out);
+    // Free the matrices
+    res = mfree(&m);
+    assert(res == MAT_SUCCESS);
+    res = mfree(&m_out);
+    assert(res == MAT_SUCCESS);
     printf("Transposition test passed!\n");
 }
 
 void test_addition() {
-    matrix_t *m, *n, *m_out;
-    mnew(2, 3, &m);
-    mnew(2, 3, &n);
-    mnew(2, 3, &m_out);
+    matrix_s *m, *n, *m_out;
+    matrix_status_s res;
+    bool e;
 
-    mwrite(m, 0, 0, 5.0f);
-    mwrite(n, 0, 0, 5.0f);
-    assert(matrix_t_eq(m, n));
+    // Allocate the matrices
+    res = mnew(2, 3, &m);
+    assert(res == MAT_SUCCESS);
+    res = mnew(2, 3, &n);
+    assert(res == MAT_SUCCESS);
+    res = mnew(2, 3, &m_out);
+    assert(res == MAT_SUCCESS);
 
-    int status = madd(m, n, m_out);
-    assert(status == MAT_SUCCESS);
-    assert(!matrix_t_eq(m, m_out));
+    // Write to the source matrices
+    res = mwrite(m, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+    res = mwrite(n, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, n, &e);
+    assert(res == MAT_SUCCESS);
+    assert(e);
 
-    float res;
-    mread(m_out, 0, 0, &res);
-    assert(float_eq(res, 10.0f));
+    // Perform the addition
+    res = madd(m, n, m_out);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, m_out, &e);
+    assert(!e);
 
-    mfree(&m);
-    mfree(&n);
-    mfree(&m_out);
+    // Check the addition was correct
+    float a;
+    res = mread(m_out, 0, 0, &a);
+    assert(res == MAT_SUCCESS);
+    assert(float_eq(a, 10.0f));
+
+    // Free the matrices
+    res = mfree(&m);
+    assert(res == MAT_SUCCESS);
+    res = mfree(&n);
+    assert(res == MAT_SUCCESS);
+    res = mfree(&m_out);
+    assert(res == MAT_SUCCESS);
     printf("Addition test passed!\n");
 }
 
 void test_mmul_scalar() {
-    matrix_t *m, *m_out;
+    matrix_s *m, *m_out;
+    matrix_status_s res;
+    bool e;
     float s = 5.0f;
-    mnew(2, 2, &m);
-    mnew(2, 2, &m_out);
-    assert(matrix_t_eq(m, m_out));
 
-    mwrite(m, 0, 0, 5.0f);
-    assert(!matrix_t_eq(m, m_out));
+    // Allocate the matrices
+    res = mnew(2, 2, &m);
+    assert(res == MAT_SUCCESS);
+    res = mnew(2, 2, &m_out);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, m_out, &e);
+    assert(res == MAT_SUCCESS);
+    assert(e);
 
-    int res = mmul_scalar(m, s, m_out);
+    // Write to the source matrix
+    res = mwrite(m, 0, 0, 5.0f);
+    assert(res == MAT_SUCCESS);
+    res = meq(m, m_out, &e);
+    assert(res == MAT_SUCCESS);
+    assert(!e);
+
+    // Perform scalar multiplication
+    res = mmul_scalar(m, s, m_out);
     assert(res == MAT_SUCCESS);
 
+    // Check the multiplication was correct
     float f;
-    mread(m_out, 0, 0, &f);
+    res = mread(m_out, 0, 0, &f);
+    assert(res == MAT_SUCCESS);
     assert(float_eq(f, 25.0f));
 
-    mfree(&m);
-    mfree(&m_out);
+    // Free the matrices
+    res = mfree(&m);
+    assert(res == MAT_SUCCESS);
+    res = mfree(&m_out);
+    assert(res == MAT_SUCCESS);
     printf("Multiplication matrix-scalar tests passed!\n");
 }
 
