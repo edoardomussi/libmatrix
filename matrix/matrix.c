@@ -23,12 +23,14 @@ int mnew(int rows, int cols, matrix_s** m_out) {
     // Initialize the inner values
     (*m_out)->rows = rows;
     (*m_out)->columns = cols;
-    (*m_out)->stride = (cols + (BLK_SIZE - 1)) & ~(BLK_SIZE -1);
+    size_t stride = (cols + (BLK_SIZE -1)) & ~(BLK_SIZE - 1);
+    stride = (stride > 0 && ((stride & (stride - 1)) == 0)) ? (stride + BLK_SIZE) : stride;
+    (*m_out)->stride = stride;
 
     const size_t p_size = (size_t)rows * (*m_out)->stride * sizeof(float);
 
     // Allocate the inner structure
-    (*m_out)->data = aligned_alloc(64, p_size);
+    (*m_out)->data = aligned_alloc(BLK_SIZE, p_size);
     if ((*m_out)->data == NULL) {
         free(*m_out);
         *m_out = NULL;
@@ -180,8 +182,8 @@ int mmul_scalar(const matrix_s* m, float s, matrix_s* m_out) {
     float* restrict dst = m_out->data;
     const int rows = m->rows;
     const int cols = m->columns;
-    const int src_stride = m->stride;
-    const int dst_stride = m_out->stride;
+    const size_t src_stride = m->stride;
+    const size_t dst_stride = m_out->stride;
 
     for (int i=0; i < rows; i++) {
         const float* src_row = src + ((size_t)i * src_stride);
@@ -207,7 +209,7 @@ static int mmul_small(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
 
 
     for(int i=0; i < src_a_rows; i++) {
-        const int a_ofst = i * src_a_stride;
+        const size_t a_ofst = (size_t)i * src_a_stride;
         for(int j=0; j < src_b_cols; j++) {
             float sum = 0.00000f;
             for (int k=0; k < src_a_cols; k++) {
