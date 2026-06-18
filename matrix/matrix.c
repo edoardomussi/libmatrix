@@ -3,10 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include "matrix.h"
 
+#define CACHE_THRESHOLD_BYTES (512 * 1024)
 #define BLK_SIZE 64
+#define TILE_SIZE 32
 
 
 static inline bool float_eq(float a, float b) {
@@ -35,7 +36,7 @@ int mnew(int rows, int cols, matrix_s** m_out) {
         free(*m_out);
         *m_out = NULL;
         return MAT_ERROR_ALLOCATION_FAILED;
-    };
+    }
 
     memset((*m_out)->data, 0, p_size);
 
@@ -47,7 +48,7 @@ int mfree(matrix_s** m) {
 
     if((*m)->data != NULL) {
         free((*m)->data);
-    }; 
+    }
     
     free(*m);
     *m = NULL;
@@ -69,7 +70,7 @@ int mprint(const matrix_s* m) {
         for (int j=0; j < cols; j++)
             printf("%f ", row_ptr[j]);
         printf("\n");
-    };
+    }
     printf("\n");
     
     return MAT_SUCCESS;
@@ -113,8 +114,8 @@ int meq(const matrix_s* a, const matrix_s* b, bool* res) {
         const float* row_b = b_data + ((size_t)i * b_stride);
         for (int j=0; j < cols; j++) {
             if (!float_eq(row_a[j], row_b[j])) return MAT_SUCCESS;
-        };
-    };
+        }
+    }
 
     *res = true;
     return MAT_SUCCESS;
@@ -137,8 +138,8 @@ int mtpose(const matrix_s* m, matrix_s* m_out) {
         const float* src_row = src + ((size_t)i * src_stride);
         for (int j=0; j < src_cols; j++) {
             dst[dst_stride*(size_t)j+i] = src_row[j];
-        };
-    };
+        }
+    }
 
     return MAT_SUCCESS;
 }
@@ -167,8 +168,8 @@ int madd(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
         float* dst_row = dst + ((size_t)i * dst_stride);
         for (int j=0; j < cols; j++) {
             dst_row[j] = a_row[j] + b_row[j];
-        };
-    };
+        }
+    }
 
     return MAT_SUCCESS;
 }
@@ -190,8 +191,8 @@ int mmul_scalar(const matrix_s* m, float s, matrix_s* m_out) {
         float* dst_row = dst + ((size_t)i * dst_stride);
         for (int j=0; j < cols; j++) {
             dst_row[j] = src_row[j]*s;
-        };
-    };
+        }
+    }
 
     return MAT_SUCCESS;
 }
@@ -214,10 +215,10 @@ static int mmul_small(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
             float sum = 0.00000f;
             for (int k=0; k < src_a_cols; k++) {
                 sum += src_a[a_ofst+k] * src_b[k*src_b_stride+j] ;
-            };
+            }
             dst[i*dst_stride+j] = sum;
-        };
-    };
+        }
+    }
     return MAT_SUCCESS;
 }
 
@@ -231,7 +232,7 @@ static int mmul_tpose(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     if (res != MAT_SUCCESS){
         mfree(&b_t);
         return res;
-    };
+    }
 
     const float* restrict src_a = a->data;
     const float* restrict src_b = b_t->data;
@@ -251,16 +252,60 @@ static int mmul_tpose(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
             float sum = 0.00000f;
             for (int k=0; k < src_a_cols; k++) {
                 sum += a_row[k] * b_row[k];
-            };
+            }
             dst[i*dst_stride+j] = sum;
-        };
-    };
+        }
+    }
     mfree(&b_t);
     return MAT_SUCCESS;
 }
 
 static int mmul_lt(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
-    //TODO 3
+    // Transpose the matrix to improve cache locality
+     matrix_s *b_t;
+     matrix_status_s res = mnew(b->columns, b->rows, &b_t);
+
+     if (res != MAT_SUCCESS) return MAT_ERROR_ALLOCATION_FAILED;
+     res = mtpose (b, b_t);
+     if (res != MAT_SUCCESS) {
+         mfree(&b_t);
+         return res;
+     };
+
+     const float* restrict src_a = a->data;
+     const int src_a_rows = a->rows;
+     const int src_a_cols = a->columns;
+     const size_t src_a_stride = a->stride;
+     const float* restrict src_b = b_t->data;
+     const int src_b_rows = b_t->rows;
+     const size_t src_b_stride = b_t->stride;
+     float* restrict dst = m_out->data;
+     const int dst_rows = m_out->rows;
+     const int dst_cols = m_out->columns;
+     const size_t dst_stride = m_out->stride;
+
+     // Begin tiled jumping
+     for (size_t ii=0; ii < src_a_rows; ii += TILE_SIZE) {
+         for (size_t jj=0; jj < src_b_rows; jj += TILE_SIZE) {
+             for (size_t kk=0; kk < src_a_cols; kk += TILE_SIZE) {
+                 // Set upper boundaries for the block to avoid reading into the padding
+                 const size_t i_bound = ((ii + TILE_SIZE) > src_a_rows) ? src_a_rows : (ii + TILE_SIZE);
+                 const size_t j_bound = ((jj + TILE_SIZE) > src_b_rows) ? src_b_rows : (jj + TILE_SIZE);
+                 const size_t k_bound = ((kk + TILE_SIZE) > src_a_cols) ? src_a_cols : (kk + TILE_SIZE);
+
+                 for (size_t i=ii; i < i_bound; i++) {
+                     for (size_t j=jj; j < j_bound; j++) {
+                         float sum = 0.00000f;
+                         for (size_t k=kk; k < k_bound; k++) {
+                             sum += src_a[i*src_a_stride+k] * src_b[j*src_b_stride+k];
+                         }
+                         dst[i*dst_stride+j] += sum;
+                     }
+                 }
+             }
+         }
+     }
+
     return MAT_SUCCESS;
 }
 
@@ -273,9 +318,9 @@ int mmul(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
         return MAT_ERROR_DIMENSION_MISMATCH;
 
     const int tpose_threshold = 32;
-    const int lt_threshold = 256;
+    const size_t working_mem = (((size_t)a->rows * a->stride) + ((size_t)b->rows * b->stride) + ((size_t)m_out->rows * m_out->stride)) * sizeof(float);
 
-    //if ((a->rows > lt_threshold && a->columns > lt_threshold) || (b->rows > lt_threshold && b->columns > lt_threshold)) return mmul_lt(a, b, m_out);
+    if (working_mem > CACHE_THRESHOLD_BYTES) return mmul_lt(a, b, m_out);
     if (b->columns > tpose_threshold) return mmul_tpose(a, b, m_out);
     return mmul_small(a, b, m_out);
 }
