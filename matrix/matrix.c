@@ -174,6 +174,36 @@ int madd(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     return MAT_SUCCESS;
 }
 
+int msub(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
+    if (a == NULL || b == NULL || m_out == NULL) return MAT_ERROR_NULL_POINTER;
+    if (a->columns != b->columns ||
+        a->rows != b->rows ||
+        m_out->columns != a->columns ||
+        m_out->rows != a->rows)
+        return MAT_ERROR_DIMENSION_MISMATCH;
+    if (a->data == NULL || b->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
+
+    const float* src_a = a->data;
+    const float* src_b = b->data;
+    float* dst = m_out->data;
+    const int rows = a->rows;
+    const int cols = a->columns;
+    const size_t a_stride = a->stride;
+    const size_t b_stride = b->stride;
+    const size_t dst_stride = m_out->stride;
+
+    for (int i=0; i < rows; i++) {
+        const float* a_row = src_a +((size_t)i * a_stride);
+        const float* b_row = src_b +((size_t)i * b_stride);
+        float* dst_row = dst + ((size_t)i * dst_stride);
+        for (int j=0; j < cols; j++) {
+            dst_row[j] = a_row[j] - b_row[j];
+        }
+    }
+
+    return MAT_SUCCESS;
+}
+
 int mmul_scalar(const matrix_s* m, float s, matrix_s* m_out) {
     if (m == NULL || m_out == NULL) return MAT_ERROR_NULL_POINTER;
     if (m->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;

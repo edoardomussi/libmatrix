@@ -95,6 +95,15 @@ int mtpose(const matrix_s* m, matrix_s* m_out);
 int madd(const matrix_s* a, const matrix_s* b, matrix_s* m_out);
 
 /**
+ * @brief Subtract matrix b from matrix a.
+ * @param a Matrix to subtract from.
+ * @param b Matrix to subtract.
+ * @param m_out Matrix pointer to the resulting matrix.
+ * @return matrix_status_s Status code of the operation.
+ */
+int msub(const matrix_s* a, const matrix_s* b, matrix_s* m_out);
+
+/**
  * @brief Multiplicate a matrix by a scalar value.
  * @param m Matrix to be multiplied.
  * @param s Scalar value.
