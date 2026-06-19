@@ -1,4 +1,4 @@
-# Matrix/Tensor Library
+# Matrix Library
 A self-taught technical deep-dive into System Engineering and HPC.
 
 ## Core Principles
