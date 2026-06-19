@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <immintrin.h>
+#include <xmmintrin.h>
 #include "matrix.h"
 
 #define CACHE_THRESHOLD_BYTES (512 * 1024)
@@ -166,7 +168,16 @@ int madd(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
         const float* a_row = src_a +((size_t)i * a_stride);
         const float* b_row = src_b +((size_t)i * b_stride);
         float* dst_row = dst + ((size_t)i * dst_stride);
-        for (int j=0; j < cols; j++) {
+        int j = 0;
+        for (; j <= cols-8 ; j+=8) {
+            __m256 vec_a = _mm256_load_ps(&a_row[j]);
+            __m256 vec_b = _mm256_load_ps(&b_row[j]);
+
+            __m256 vec_res = _mm256_add_ps(vec_a, vec_b);
+            _mm256_store_ps(&dst_row[j], vec_res);
+        }
+
+        for (; j < cols; j++) {
             dst_row[j] = a_row[j] + b_row[j];
         }
     }
@@ -196,7 +207,16 @@ int msub(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
         const float* a_row = src_a +((size_t)i * a_stride);
         const float* b_row = src_b +((size_t)i * b_stride);
         float* dst_row = dst + ((size_t)i * dst_stride);
-        for (int j=0; j < cols; j++) {
+        int j = 0;
+
+        for (; j <= cols-8; j+=8) {
+            __m256 vec_a = _mm256_load_ps(&a_row[j]);
+            __m256 vec_b = _mm256_load_ps(&b_row[j]);
+
+            __m256 vec_res = _mm256_sub_ps(vec_a, vec_b);
+            _mm256_store_ps(&dst_row[j], vec_res);
+        }
+        for (; j < cols; j++) {
             dst_row[j] = a_row[j] - b_row[j];
         }
     }
@@ -215,11 +235,18 @@ int mmul_scalar(const matrix_s* m, float s, matrix_s* m_out) {
     const int cols = m->columns;
     const size_t src_stride = m->stride;
     const size_t dst_stride = m_out->stride;
+    __m256 vec_s = _mm256_set1_ps(s);
 
     for (int i=0; i < rows; i++) {
         const float* src_row = src + ((size_t)i * src_stride);
         float* dst_row = dst + ((size_t)i * dst_stride);
-        for (int j=0; j < cols; j++) {
+        int j = 0;
+        for (; j <= cols-8; j+=8) {
+            __m256 vec_src = _mm256_load_ps(&src_row[j]);
+            __m256 vec_res = _mm256_mul_ps(vec_src, vec_s);
+            _mm256_store_ps(&dst_row[j], vec_res);
+        }
+        for (; j < cols; j++) {
             dst_row[j] = src_row[j]*s;
         }
     }
@@ -241,12 +268,18 @@ static int mmul_small(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
 
     for(int i=0; i < src_a_rows; i++) {
         const size_t a_ofst = (size_t)i * src_a_stride;
-        for(int j=0; j < src_b_cols; j++) {
-            float sum = 0.00000f;
-            for (int k=0; k < src_a_cols; k++) {
-                sum += src_a[a_ofst+k] * src_b[k*src_b_stride+j] ;
+        for(int j = 0; j < src_a_cols ; j++) {
+            __m256 vec_a = _mm256_set1_ps(src_a[a_ofst+j]);
+            int k = 0;
+
+            for (; k <= src_b_cols-8; k+=8) {
+                __m256 vec_dst = _mm256_load_ps(&dst[i*dst_stride+k]);
+                __m256 vec_b = _mm256_load_ps(&src_b[j*src_b_stride+k]);
+                vec_dst = _mm256_fmadd_ps(vec_a, vec_b, vec_dst);
+                _mm256_store_ps(&dst[i*dst_stride+k], vec_dst);
             }
-            dst[i*dst_stride+j] = sum;
+            for (; k < src_b_cols; k++)
+                dst[i*dst_stride+k] += src_a[i*src_a_stride+j] * src_b[j*src_b_stride+k]; 
         }
     }
     return MAT_SUCCESS;
@@ -274,15 +307,32 @@ static int mmul_tpose(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     const size_t src_b_stride = b_t->stride;
     const size_t dst_stride = m_out->stride;
 
-    // Begin multiplication using the transposed matrix
     for (int i=0; i < src_a_rows; i++) {
         const float* a_row = src_a + ((size_t)i * src_a_stride);
         for (int j=0; j < src_b_rows; j++) {
             const float* b_row = src_b + ((size_t)j * src_b_stride);
-            float sum = 0.00000f;
-            for (int k=0; k < src_a_cols; k++) {
+            __m256 vec_sum = _mm256_setzero_ps();
+            int k = 0;
+            // SIMD vectorized loop
+            for (; k <= src_a_cols-8 ; k+=8) {
+                __m256 vec_a = _mm256_load_ps(&a_row[k]);
+                __m256 vec_b = _mm256_load_ps(&b_row[k]);
+                vec_sum = _mm256_fmadd_ps(vec_a, vec_b, vec_sum);
+            }
+            // Folding the register to a single float
+            __m128 vlow = _mm256_castps256_ps128(vec_sum);
+            __m128 vhigh = _mm256_extractf128_ps(vec_sum, 1);
+            vlow = _mm_add_ps(vlow, vhigh);
+            __m128 shuf = _mm_movehl_ps(vlow, vlow);
+            vlow = _mm_add_ps(vlow, shuf);
+            shuf = _mm_shuffle_ps(vlow, vlow, _MM_SHUFFLE(2, 3, 0, 1));
+            vlow = _mm_add_ps(vlow, shuf);
+            float sum = _mm_cvtss_f32(vlow);
+            // Cleanup loop
+            for (; k < src_a_cols; k++) {
                 sum += a_row[k] * b_row[k];
             }
+            // Storing the cumulative result
             dst[i*dst_stride+j] = sum;
         }
     }
@@ -325,16 +375,31 @@ static int mmul_lt(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
 
                  for (size_t i=ii; i < i_bound; i++) {
                      for (size_t j=jj; j < j_bound; j++) {
-                         float sum = 0.00000f;
-                         for (size_t k=kk; k < k_bound; k++) {
-                             sum += src_a[i*src_a_stride+k] * src_b[j*src_b_stride+k];
+                         int k = kk;
+                         __m256 vec_sum = _mm256_setzero_ps();
+                         for (; k <= (int)k_bound-8; k+=8) {
+                             __m256 vec_a = _mm256_load_ps(&src_a[i*src_a_stride+k]);
+                             __m256 vec_b = _mm256_load_ps(&src_b[j*src_b_stride+k]);
+                             vec_sum = _mm256_fmadd_ps(vec_a, vec_b, vec_sum);
                          }
-                         dst[i*dst_stride+j] += sum;
-                     }
-                 }
-             }
-         }
-     }
+                         // Folding the register to a single float
+                        __m128 vlow = _mm256_castps256_ps128(vec_sum);
+                        __m128 vhigh = _mm256_extractf128_ps(vec_sum, 1);
+                        vlow = _mm_add_ps(vlow, vhigh);
+                        __m128 shuf = _mm_movehl_ps(vlow, vlow);
+                        vlow = _mm_add_ps(vlow, shuf);
+                        shuf = _mm_shuffle_ps(vlow, vlow, _MM_SHUFFLE(2, 3, 0, 1));
+                        vlow = _mm_add_ps(vlow, shuf);
+                        float sum = _mm_cvtss_f32(vlow);
+                        for (; k < k_bound; k++) {
+                            sum += src_a[i*src_a_stride+k] * src_b[j*src_b_stride+k];
+                        }
+                        dst[i*dst_stride+j] += sum;
+                    }
+                }
+            }
+        }
+    }
 
     return MAT_SUCCESS;
 }
