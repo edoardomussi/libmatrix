@@ -9,7 +9,7 @@
 The high-performance loops rely on strict physical memory expectations:
 
 + **Stride Alignment:**
-    All matrices are padded to a 64-byte `stride`. This ensures that every row starts at a memory address that is a multiple of `BLK_SIZE`, which is critical for cache-line alignment.
+    All matrices are padded to a 32-byte `stride`. This ensures that every row starts at a memory address that is a multiple of `BLK_SIZE`, which is critical for cache-line alignment.
 + **Aliasing Restrictions:**
     For all arithmetic operations (e.g., `mmul`, `madd`), the output buffer must **not** point to the same address as any input buffer.
     This prevents read-after-write hazards and allows the compiler to fully utilize SIMD vectorization without needing to account for overlapping memory regions.
