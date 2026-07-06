@@ -1,87 +1,58 @@
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <immintrin.h>
 #include <xmmintrin.h>
-#include "matrix.h"
 
-#define CACHE_THRESHOLD_BYTES (512 * 1024)
-#define BLK_SIZE 64
-#define TILE_SIZE 32
+
+#include "../include/matrix.h"
+#include "../include/matrix_internal.h"
+
+#define CACHE_THRESHOLD_BYTES (256 * 1024)
+#define BLK_SIZE 32
+#define TILE_SIZE 16
 
 
 static inline bool float_eq(float a, float b) {
-    float res = a-b;
-    res = res < 0 ? -res : res;
-    return res < 0.00001f;
+    return fabsf(a-b) < 0.00001f;
 }
 
 int mnew(int rows, int cols, matrix_s** m_out) {
-    // Allocate the outer structure
-    *m_out = malloc(sizeof(matrix_s));
-    if ((*m_out) == NULL) return MAT_ERROR_ALLOCATION_FAILED;
+    // Calculate stride
+    size_t stride = (cols + (BLK_SIZE -1)) & ~(BLK_SIZE - 1);
+    int is_pow2 = (stride > 0) & ((stride & (stride - 1)) == 0);
+    stride += is_pow2 * BLK_SIZE;
 
-    // Initialize the inner values
+    // Calculate the size of the data payload
+    if (rows <= 0 || cols <= 0) return MAT_ERROR_INVALID_SIZE;
+    size_t p_size = (size_t)rows * stride * sizeof(float);
+
+    // Calculate the total size of the structure
+    size_t t_size = sizeof(matrix_s) + p_size;
+
+    if (m_out == NULL) return MAT_ERROR_NULL_POINTER;
+    *m_out = aligned_alloc(BLK_SIZE, t_size);
+    if (*m_out == NULL) return MAT_ERROR_ALLOCATION_FAILED;
+
+    memset(*m_out, 0, t_size);
     (*m_out)->rows = rows;
     (*m_out)->columns = cols;
-    size_t stride = (cols + (BLK_SIZE -1)) & ~(BLK_SIZE - 1);
-    stride = (stride > 0 && ((stride & (stride - 1)) == 0)) ? (stride + BLK_SIZE) : stride;
     (*m_out)->stride = stride;
-
-    const size_t p_size = (size_t)rows * (*m_out)->stride * sizeof(float);
-
-    // Allocate the inner structure
-    (*m_out)->data = aligned_alloc(BLK_SIZE, p_size);
-    if ((*m_out)->data == NULL) {
-        free(*m_out);
-        *m_out = NULL;
-        return MAT_ERROR_ALLOCATION_FAILED;
-    }
-
-    memset((*m_out)->data, 0, p_size);
 
     return MAT_SUCCESS;
 }
 
 int mfree(matrix_s** m) {
     if (m == NULL || *m == NULL) return MAT_ERROR_NULL_POINTER;
-
-    if((*m)->data != NULL) {
-        free((*m)->data);
-    }
-    
-    free(*m);
+    free (*m);
     *m = NULL;
-
-    return MAT_SUCCESS;
-}
-
-int mprint(const matrix_s* m) {
-    if (m == NULL) return MAT_ERROR_NULL_POINTER;
-    if (m->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
-
-    const int rows = m->rows;
-    const int cols = m->columns;
-    const size_t stride = m->stride;
-    const float *data = m->data;
-
-    for (int i=0; i < rows; i++) {
-        const float* row_ptr = data + ((size_t)i * stride);
-        for (int j=0; j < cols; j++)
-            printf("%f ", row_ptr[j]);
-        printf("\n");
-    }
-    printf("\n");
-    
     return MAT_SUCCESS;
 }
 
 int mwrite(matrix_s* m, int row, int col, float val) {
     if (m == NULL) return MAT_ERROR_NULL_POINTER;
     if (col < 0 || row <0 || col >= m->columns || row >= m->rows) return MAT_ERROR_OUT_OF_BOUNDS;
-    if (m->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
 
     *(m->data + ((size_t)row * m->stride) + col) = val;
 
@@ -91,7 +62,6 @@ int mwrite(matrix_s* m, int row, int col, float val) {
 int mread(const matrix_s* m, int row, int col, float* res) {
     if (m == NULL) return MAT_ERROR_NULL_POINTER;
     if (col < 0 || row < 0 || col >= m->columns || row >= m->rows) return MAT_ERROR_OUT_OF_BOUNDS;
-    if (m->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
 
     *res = *(m->data + ((size_t)row * m->stride) + col);
 
@@ -100,7 +70,6 @@ int mread(const matrix_s* m, int row, int col, float* res) {
 
 int meq(const matrix_s* a, const matrix_s* b, bool* res) {
     if (a == NULL || b == NULL) return MAT_ERROR_NULL_POINTER;
-    if (a->data == NULL || b->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
     *res = false;
     if (a->rows != b->rows || a->columns != b->columns) return MAT_SUCCESS;
 
@@ -125,8 +94,7 @@ int meq(const matrix_s* a, const matrix_s* b, bool* res) {
 
 int mtpose(const matrix_s* m, matrix_s* m_out) {
     if (m == NULL || m_out == NULL) return MAT_ERROR_NULL_POINTER;
-    if (m->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
-    if (m->data == m_out->data) return MAT_ALIASING_NOT_ALLOWED;
+    if (m == m_out) return MAT_ALIASING_NOT_ALLOWED;
     if (m->rows != m_out->columns || m->columns != m_out->rows) return MAT_ERROR_DIMENSION_MISMATCH;
 
     const float* restrict src = m->data;
@@ -153,7 +121,6 @@ int madd(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
         m_out->columns != a->columns ||
         m_out->rows != a->rows)
         return MAT_ERROR_DIMENSION_MISMATCH;
-    if (a->data == NULL || b->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
 
     const float* src_a = a->data;
     const float* src_b = b->data;
@@ -192,7 +159,6 @@ int msub(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
         m_out->columns != a->columns ||
         m_out->rows != a->rows)
         return MAT_ERROR_DIMENSION_MISMATCH;
-    if (a->data == NULL || b->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
 
     const float* src_a = a->data;
     const float* src_b = b->data;
@@ -226,8 +192,7 @@ int msub(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
 
 int mmul_scalar(const matrix_s* m, float s, matrix_s* m_out) {
     if (m == NULL || m_out == NULL) return MAT_ERROR_NULL_POINTER;
-    if (m->data == NULL || m_out->data == NULL) return MAT_ERROR_NULL_DATA_POINTER;
-    if (m->data == m_out->data) return MAT_ALIASING_NOT_ALLOWED;
+    if (m == m_out) return MAT_ALIASING_NOT_ALLOWED;
 
     const float* restrict src = m->data;
     float* restrict dst = m_out->data;
@@ -254,7 +219,7 @@ int mmul_scalar(const matrix_s* m, float s, matrix_s* m_out) {
     return MAT_SUCCESS;
 }
 
-static int mmul_small(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
+MATRIX_INTERNAL int mmul_small(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     const float* restrict src_a = a->data;
     const float* restrict src_b = b->data;
     float* restrict dst = m_out->data;
@@ -268,24 +233,25 @@ static int mmul_small(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
 
     for(int i=0; i < src_a_rows; i++) {
         const size_t a_ofst = (size_t)i * src_a_stride;
+        float* restrict dst_row = dst + (i * dst_stride);
         for(int j = 0; j < src_a_cols ; j++) {
             __m256 vec_a = _mm256_set1_ps(src_a[a_ofst+j]);
+            const float* restrict b_row = src_b + (j * src_b_stride);
             int k = 0;
-
-            for (; k <= src_b_cols-8; k+=8) {
-                __m256 vec_dst = _mm256_load_ps(&dst[i*dst_stride+k]);
-                __m256 vec_b = _mm256_load_ps(&src_b[j*src_b_stride+k]);
+            for (; k <= src_b_cols-1; k+=8) {
+                __m256 vec_dst = _mm256_load_ps(&dst_row[k]);
+                __m256 vec_b = _mm256_load_ps(&b_row[k]);
                 vec_dst = _mm256_fmadd_ps(vec_a, vec_b, vec_dst);
-                _mm256_store_ps(&dst[i*dst_stride+k], vec_dst);
+                _mm256_store_ps(&dst_row[k], vec_dst);
             }
             for (; k < src_b_cols; k++)
-                dst[i*dst_stride+k] += src_a[i*src_a_stride+j] * src_b[j*src_b_stride+k]; 
+                dst_row[k] += src_a[a_ofst + j] * b_row[k];
         }
     }
     return MAT_SUCCESS;
 }
 
-static int mmul_tpose(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
+MATRIX_INTERNAL int mmul_tpose(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     // Transpose the matrix to improve cache locality
     matrix_s *b_t;
     matrix_status_s res = mnew(b->columns, b->rows, &b_t);
@@ -340,7 +306,7 @@ static int mmul_tpose(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     return MAT_SUCCESS;
 }
 
-static int mmul_lt(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
+MATRIX_INTERNAL int mmul_lt(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     // Transpose the matrix to improve cache locality
      matrix_s *b_t;
      matrix_status_s res = mnew(b->columns, b->rows, &b_t);
@@ -400,13 +366,13 @@ static int mmul_lt(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
             }
         }
     }
-
+    mfree(&b_t);
     return MAT_SUCCESS;
 }
 
 int mmul(const matrix_s* a, const matrix_s* b, matrix_s* m_out) {
     if (a == NULL || b == NULL || m_out == NULL) return MAT_ERROR_NULL_POINTER;
-    if (m_out->data == a->data || m_out->data == b->data) return MAT_ALIASING_NOT_ALLOWED;
+    if (m_out == a || m_out == b) return MAT_ALIASING_NOT_ALLOWED;
     if (a->columns != b->rows ||
         m_out->rows != a ->rows ||
         m_out->columns != b-> columns)

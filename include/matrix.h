@@ -1,14 +1,16 @@
 #ifndef MATRIX_H
 #define MATRIX_H
 
+#include <stddef.h>
 /**
  * @brief A structure representing a 2D matrix stored as a flat array.
  */
 typedef struct {
     int rows;
     int columns;
-    int stride;
-    float* data;
+    size_t stride;
+    char padding[48];
+    float data[];
 } matrix_s;
 
 /**
@@ -17,7 +19,7 @@ typedef struct {
 typedef enum {
     MAT_SUCCESS = 0,
     MAT_ERROR_NULL_POINTER = 1,
-    MAT_ERROR_NULL_DATA_POINTER = 2,
+    MAT_ERROR_INVALID_SIZE = 2,
     MAT_ERROR_OUT_OF_BOUNDS = 3,
     MAT_ERROR_DIMENSION_MISMATCH = 4,
     MAT_ERROR_NOT_SQUARE = 5,

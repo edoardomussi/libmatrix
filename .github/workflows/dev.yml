@@ -1,0 +1,22 @@
+name: dev CI Pipeline
+
+on:
+  push:
+    branches: [ "dev" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Configure CMake
+      run: cmake -B build -S .
+
+    - name: Build Test Suite
+      run: cmake --build build
+
+    - name: Run Tests
+      run: ./build/test_suite

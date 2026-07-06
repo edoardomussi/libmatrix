@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <math.h>
-#include "matrix.h"
+#include "../include/matrix.h"
 
 #include <unistd.h>
 
@@ -225,7 +225,42 @@ void test_mmul_scalar() {
 }
 
 void test_mmul(){
-    // TODO: implement mmul() test
+    matrix_s *a, *b, *c;
+    matrix_status_s res;
+
+    // 1. Allocate large matrices to overflow L1 cache
+    res = mnew(1000, 1000, &a);
+    assert(res == MAT_SUCCESS);
+    res = mnew(1000, 1000, &b);
+    assert(res == MAT_SUCCESS);
+    res = mnew(1000, 1000, &c);
+    assert(res == MAT_SUCCESS);
+
+    // 2. Fast Initialization (Forces OS to map physical memory)
+    for (int r = 0; r < 1000; r++) {
+        for (int c = 0; c < 1000; c++) {
+            mwrite(a, r, c, 1.0f);
+            mwrite(b, r, c, 2.0f);
+        }
+    }
+
+    // 3. THE HOT PATH (This is what perf measures)
+    // Replace 'mmul' with whichever algorithm you are benchmarking
+    res = mmul(a, b, c); 
+    assert(res == MAT_SUCCESS);
+
+    // 4. O(1) Sanity Check (No cache pollution)
+    float val;
+    res = mread(c, 500, 500, &val);
+    assert(res == MAT_SUCCESS);
+    assert(float_eq(val, 2000.0f));
+
+    // 5. Cleanup
+    mfree(&a);
+    mfree(&b);
+    mfree(&c);
+    
+    printf("Matrix multiplication tests complete!\n");
 }
 
 int main() {
@@ -237,6 +272,7 @@ int main() {
     test_transposition();
     test_addition();
     test_mmul_scalar();
+    test_mmul();
 
     printf("\nAll tests passed!\n");
     return 0;
